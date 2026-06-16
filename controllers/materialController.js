@@ -143,7 +143,7 @@ const downloadMaterial = async (req, res) => {
       return res.redirect(material.filePath);
     }
 
-    const absolutePath = path.resolve(material.filePath);
+    const absolutePath = path.join(__dirname, "..", material.filePath);
 
     if (!fs.existsSync(absolutePath)) {
       return res.status(404).json({ message: "File not found on server" });
@@ -188,7 +188,7 @@ const deleteMaterial = async (req, res) => {
           console.warn("Firebase Storage is not configured. Skipping cloud file deletion.");
         }
       } else {
-        const absolutePath = path.resolve(material.filePath);
+        const absolutePath = path.join(__dirname, "..", material.filePath);
         if (fs.existsSync(absolutePath)) {
           fs.unlinkSync(absolutePath);
         }

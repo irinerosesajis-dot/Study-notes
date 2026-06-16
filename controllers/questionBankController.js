@@ -183,7 +183,7 @@ const downloadQuestionBankFile = async (req, res) => {
       return res.redirect(filePath);
     }
 
-    const absolutePath = path.resolve(filePath);
+    const absolutePath = path.join(__dirname, "..", filePath);
 
     if (!fs.existsSync(absolutePath)) {
       return res.status(404).json({ message: "File not found on server" });
@@ -226,7 +226,7 @@ const deleteQuestionBank = async (req, res) => {
           console.warn("Firebase Storage is not configured. Skipping cloud file deletion.");
         }
       } else {
-        const qPath = path.resolve(questionBank.questionFilePath);
+        const qPath = path.join(__dirname, "..", questionBank.questionFilePath);
         if (fs.existsSync(qPath)) fs.unlinkSync(qPath);
       }
     }
@@ -243,7 +243,7 @@ const deleteQuestionBank = async (req, res) => {
           console.warn("Firebase Storage is not configured. Skipping cloud file deletion.");
         }
       } else {
-        const sPath = path.resolve(questionBank.solutionFilePath);
+        const sPath = path.join(__dirname, "..", questionBank.solutionFilePath);
         if (fs.existsSync(sPath)) fs.unlinkSync(sPath);
       }
     }
