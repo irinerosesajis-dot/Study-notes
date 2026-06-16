@@ -1,25 +1,36 @@
 const fs = require("fs");
 const path = require("path");
 const Material = require("../models/Material");
+const { storage } = require("../config/firebase");
+const { ref, uploadBytesResumable, getDownloadURL, deleteObject } = require("firebase/storage");
 
 // @desc    Upload a study material
 // @route   POST /api/materials/upload
 // @access  Private
 const uploadMaterial = async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
-    }
-
     const { title, description, subject, scheme, semester, branch } = req.body;
 
     if (!title || !scheme || !semester || !branch) {
-      // Clean up uploaded file if fields missing
-      fs.unlinkSync(req.file.path);
       return res.status(400).json({
         message: "Title, Scheme, Semester, and Branch are required fields.",
       });
     }
+
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+
+    if (!storage) {
+      return res.status(500).json({ message: "Firebase Storage is not configured on the server. Please define Firebase environment variables in your .env file." });
+    }
+
+    // Upload to Firebase Storage
+    const uniqueName = `materials/${Date.now()}-${req.file.originalname.replace(/\s+/g, "_")}`;
+    const storageRef = ref(storage, uniqueName);
+    const metadata = { contentType: req.file.mimetype };
+    const snapshot = await uploadBytesResumable(storageRef, req.file.buffer, metadata);
+    const downloadUrl = await getDownloadURL(snapshot.ref);
 
     const material = await Material.create({
       title,
@@ -29,7 +40,7 @@ const uploadMaterial = async (req, res) => {
       semester,
       branch,
       fileName: req.file.originalname,
-      filePath: req.file.path,
+      filePath: downloadUrl,
       fileType: req.file.mimetype,
       fileSize: req.file.size,
       uploadedBy: req.user.id,
@@ -108,6 +119,10 @@ const downloadMaterial = async (req, res) => {
       return res.status(404).json({ message: "Material not found" });
     }
 
+    if (material.filePath && material.filePath.startsWith("http")) {
+      return res.redirect(material.filePath);
+    }
+
     const absolutePath = path.resolve(material.filePath);
 
     if (!fs.existsSync(absolutePath)) {
@@ -139,10 +154,25 @@ const deleteMaterial = async (req, res) => {
         .json({ message: "Not authorized to delete this material" });
     }
 
-    // Remove file from disk
-    const absolutePath = path.resolve(material.filePath);
-    if (fs.existsSync(absolutePath)) {
-      fs.unlinkSync(absolutePath);
+    // Remove file
+    if (material.filePath) {
+      if (material.filePath.startsWith("http")) {
+        if (storage) {
+          try {
+            const fileRef = ref(storage, material.filePath);
+            await deleteObject(fileRef);
+          } catch (storageErr) {
+            console.error("Error deleting from Firebase Storage:", storageErr.message);
+          }
+        } else {
+          console.warn("Firebase Storage is not configured. Skipping cloud file deletion.");
+        }
+      } else {
+        const absolutePath = path.resolve(material.filePath);
+        if (fs.existsSync(absolutePath)) {
+          fs.unlinkSync(absolutePath);
+        }
+      }
     }
 
     await material.deleteOne();

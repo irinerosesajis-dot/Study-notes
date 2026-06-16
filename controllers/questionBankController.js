@@ -1,33 +1,39 @@
 const fs = require("fs");
 const path = require("path");
 const QuestionBank = require("../models/QuestionBank");
+const { storage } = require("../config/firebase");
+const { ref, uploadBytesResumable, getDownloadURL, deleteObject } = require("firebase/storage");
 
 // @desc    Upload a question bank (and optional solution)
 // @route   POST /api/question-banks/upload
 // @access  Private
 const uploadQuestionBank = async (req, res) => {
   try {
-    const questionFile = req.files && req.files["questionFile"] ? req.files["questionFile"][0] : null;
-    const solutionFile = req.files && req.files["solutionFile"] ? req.files["solutionFile"][0] : null;
-
-    if (!questionFile) {
-      // Clean up solution file if uploaded
-      if (solutionFile) {
-        fs.unlinkSync(solutionFile.path);
-      }
-      return res.status(400).json({ message: "Question paper file is required." });
-    }
-
     const { title, subject, scheme, semester, branch, year } = req.body;
 
     if (!title || !scheme || !semester || !branch || !year) {
-      // Clean up files if fields missing
-      if (questionFile) fs.unlinkSync(questionFile.path);
-      if (solutionFile) fs.unlinkSync(solutionFile.path);
       return res.status(400).json({
         message: "Title, Scheme, Semester, Branch, and Year are required fields.",
       });
     }
+
+    const questionFile = req.files && req.files["questionFile"] ? req.files["questionFile"][0] : null;
+    const solutionFile = req.files && req.files["solutionFile"] ? req.files["solutionFile"][0] : null;
+
+    if (!questionFile) {
+      return res.status(400).json({ message: "Question paper file is required." });
+    }
+
+    if (!storage) {
+      return res.status(500).json({ message: "Firebase Storage is not configured on the server. Please define Firebase environment variables in your .env file." });
+    }
+
+    // Upload Question Paper to Firebase Storage
+    const qUniqueName = `question-banks/questions/${Date.now()}-${questionFile.originalname.replace(/\s+/g, "_")}`;
+    const qStorageRef = ref(storage, qUniqueName);
+    const qMetadata = { contentType: questionFile.mimetype };
+    const qSnapshot = await uploadBytesResumable(qStorageRef, questionFile.buffer, qMetadata);
+    const questionUrl = await getDownloadURL(qSnapshot.ref);
 
     const questionBankData = {
       title,
@@ -37,15 +43,22 @@ const uploadQuestionBank = async (req, res) => {
       branch,
       year: parseInt(year),
       questionFileName: questionFile.originalname,
-      questionFilePath: questionFile.path,
+      questionFilePath: questionUrl,
       questionFileType: questionFile.mimetype,
       questionFileSize: questionFile.size,
       uploadedBy: req.user.id,
     };
 
     if (solutionFile) {
+      // Upload Solution to Firebase Storage
+      const sUniqueName = `question-banks/solutions/${Date.now()}-${solutionFile.originalname.replace(/\s+/g, "_")}`;
+      const sStorageRef = ref(storage, sUniqueName);
+      const sMetadata = { contentType: solutionFile.mimetype };
+      const sSnapshot = await uploadBytesResumable(sStorageRef, solutionFile.buffer, sMetadata);
+      const solutionUrl = await getDownloadURL(sSnapshot.ref);
+
       questionBankData.solutionFileName = solutionFile.originalname;
-      questionBankData.solutionFilePath = solutionFile.path;
+      questionBankData.solutionFilePath = solutionUrl;
       questionBankData.solutionFileType = solutionFile.mimetype;
       questionBankData.solutionFileSize = solutionFile.size;
     }
@@ -120,6 +133,10 @@ const downloadQuestionBankFile = async (req, res) => {
       fileName = questionBank.questionFileName;
     }
 
+    if (filePath && filePath.startsWith("http")) {
+      return res.redirect(filePath);
+    }
+
     const absolutePath = path.resolve(filePath);
 
     if (!fs.existsSync(absolutePath)) {
@@ -149,14 +166,40 @@ const deleteQuestionBank = async (req, res) => {
       return res.status(403).json({ message: "Not authorized to delete this question bank" });
     }
 
-    // Remove files from disk
+    // Remove files
     if (questionBank.questionFilePath) {
-      const qPath = path.resolve(questionBank.questionFilePath);
-      if (fs.existsSync(qPath)) fs.unlinkSync(qPath);
+      if (questionBank.questionFilePath.startsWith("http")) {
+        if (storage) {
+          try {
+            const fileRef = ref(storage, questionBank.questionFilePath);
+            await deleteObject(fileRef);
+          } catch (err) {
+            console.error("Error deleting question paper from Firebase:", err.message);
+          }
+        } else {
+          console.warn("Firebase Storage is not configured. Skipping cloud file deletion.");
+        }
+      } else {
+        const qPath = path.resolve(questionBank.questionFilePath);
+        if (fs.existsSync(qPath)) fs.unlinkSync(qPath);
+      }
     }
     if (questionBank.solutionFilePath) {
-      const sPath = path.resolve(questionBank.solutionFilePath);
-      if (fs.existsSync(sPath)) fs.unlinkSync(sPath);
+      if (questionBank.solutionFilePath.startsWith("http")) {
+        if (storage) {
+          try {
+            const fileRef = ref(storage, questionBank.solutionFilePath);
+            await deleteObject(fileRef);
+          } catch (err) {
+            console.error("Error deleting solution from Firebase:", err.message);
+          }
+        } else {
+          console.warn("Firebase Storage is not configured. Skipping cloud file deletion.");
+        }
+      } else {
+        const sPath = path.resolve(questionBank.solutionFilePath);
+        if (fs.existsSync(sPath)) fs.unlinkSync(sPath);
+      }
     }
 
     await questionBank.deleteOne();
@@ -180,18 +223,27 @@ const addSolution = async (req, res) => {
     const questionBank = await QuestionBank.findById(req.params.id);
 
     if (!questionBank) {
-      fs.unlinkSync(req.file.path);
       return res.status(404).json({ message: "Question bank not found" });
     }
 
     if (questionBank.solutionFilePath) {
-      fs.unlinkSync(req.file.path);
       return res.status(400).json({ message: "A solution file has already been uploaded for this question bank." });
     }
 
+    if (!storage) {
+      return res.status(500).json({ message: "Firebase Storage is not configured on the server. Please define Firebase environment variables in your .env file." });
+    }
+
+    // Upload Solution to Firebase Storage
+    const sUniqueName = `question-banks/solutions/${Date.now()}-${req.file.originalname.replace(/\s+/g, "_")}`;
+    const sStorageRef = ref(storage, sUniqueName);
+    const sMetadata = { contentType: req.file.mimetype };
+    const sSnapshot = await uploadBytesResumable(sStorageRef, req.file.buffer, sMetadata);
+    const solutionUrl = await getDownloadURL(sSnapshot.ref);
+
     // Attach solution file
     questionBank.solutionFileName = req.file.originalname;
-    questionBank.solutionFilePath = req.file.path;
+    questionBank.solutionFilePath = solutionUrl;
     questionBank.solutionFileType = req.file.mimetype;
     questionBank.solutionFileSize = req.file.size;
 
@@ -202,7 +254,6 @@ const addSolution = async (req, res) => {
       questionBank,
     });
   } catch (error) {
-    if (req.file) fs.unlinkSync(req.file.path);
     console.error("Add solution error:", error.message);
     res.status(500).json({ message: "Server error during solution upload" });
   }

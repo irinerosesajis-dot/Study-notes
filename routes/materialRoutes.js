@@ -13,16 +13,8 @@ const {
 } = require("../controllers/materialController");
 
 // ── Multer configuration ──────────────────────────────────────────────────────
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/"); // files are stored in the uploads/ folder
-  },
-  filename: (req, file, cb) => {
-    // Unique filename: timestamp-originalname
-    const uniqueName = `${Date.now()}-${file.originalname.replace(/\s+/g, "_")}`;
-    cb(null, uniqueName);
-  },
-});
+const storage = multer.memoryStorage();
+
 
 // Allow common document & media types
 const fileFilter = (req, file, cb) => {
