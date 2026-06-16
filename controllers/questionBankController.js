@@ -24,16 +24,36 @@ const uploadQuestionBank = async (req, res) => {
       return res.status(400).json({ message: "Question paper file is required." });
     }
 
-    if (!storage) {
-      return res.status(500).json({ message: "Firebase Storage is not configured on the server. Please define Firebase environment variables in your .env file." });
+    let questionUrl = "";
+    let isQLocal = false;
+
+    if (storage) {
+      try {
+        // Upload Question Paper to Firebase Storage
+        const qUniqueName = `question-banks/questions/${Date.now()}-${questionFile.originalname.replace(/\s+/g, "_")}`;
+        const qStorageRef = ref(storage, qUniqueName);
+        const qMetadata = { contentType: questionFile.mimetype };
+        const qSnapshot = await uploadBytesResumable(qStorageRef, questionFile.buffer, qMetadata);
+        questionUrl = await getDownloadURL(qSnapshot.ref);
+      } catch (err) {
+        console.warn("Firebase Storage upload for question file failed, falling back to local disk storage:", err.message);
+        isQLocal = true;
+      }
+    } else {
+      console.warn("Firebase Storage is not configured, falling back to local disk storage for question file.");
+      isQLocal = true;
     }
 
-    // Upload Question Paper to Firebase Storage
-    const qUniqueName = `question-banks/questions/${Date.now()}-${questionFile.originalname.replace(/\s+/g, "_")}`;
-    const qStorageRef = ref(storage, qUniqueName);
-    const qMetadata = { contentType: questionFile.mimetype };
-    const qSnapshot = await uploadBytesResumable(qStorageRef, questionFile.buffer, qMetadata);
-    const questionUrl = await getDownloadURL(qSnapshot.ref);
+    if (isQLocal) {
+      const uploadDir = path.join(__dirname, "..", "uploads");
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const localFileName = `${Date.now()}-q-${questionFile.originalname.replace(/\s+/g, "_")}`;
+      const localFilePath = path.join(uploadDir, localFileName);
+      fs.writeFileSync(localFilePath, questionFile.buffer);
+      questionUrl = `uploads/${localFileName}`;
+    }
 
     const questionBankData = {
       title,
@@ -50,12 +70,35 @@ const uploadQuestionBank = async (req, res) => {
     };
 
     if (solutionFile) {
-      // Upload Solution to Firebase Storage
-      const sUniqueName = `question-banks/solutions/${Date.now()}-${solutionFile.originalname.replace(/\s+/g, "_")}`;
-      const sStorageRef = ref(storage, sUniqueName);
-      const sMetadata = { contentType: solutionFile.mimetype };
-      const sSnapshot = await uploadBytesResumable(sStorageRef, solutionFile.buffer, sMetadata);
-      const solutionUrl = await getDownloadURL(sSnapshot.ref);
+      let solutionUrl = "";
+      let isSLocal = false;
+
+      if (storage) {
+        try {
+          // Upload Solution to Firebase Storage
+          const sUniqueName = `question-banks/solutions/${Date.now()}-${solutionFile.originalname.replace(/\s+/g, "_")}`;
+          const sStorageRef = ref(storage, sUniqueName);
+          const sMetadata = { contentType: solutionFile.mimetype };
+          const sSnapshot = await uploadBytesResumable(sStorageRef, solutionFile.buffer, sMetadata);
+          solutionUrl = await getDownloadURL(sSnapshot.ref);
+        } catch (err) {
+          console.warn("Firebase Storage upload for solution file failed, falling back to local disk storage:", err.message);
+          isSLocal = true;
+        }
+      } else {
+        isSLocal = true;
+      }
+
+      if (isSLocal) {
+        const uploadDir = path.join(__dirname, "..", "uploads");
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        const localFileName = `${Date.now()}-s-${solutionFile.originalname.replace(/\s+/g, "_")}`;
+        const localFilePath = path.join(uploadDir, localFileName);
+        fs.writeFileSync(localFilePath, solutionFile.buffer);
+        solutionUrl = `uploads/${localFileName}`;
+      }
 
       questionBankData.solutionFileName = solutionFile.originalname;
       questionBankData.solutionFilePath = solutionUrl;
@@ -233,16 +276,35 @@ const addSolution = async (req, res) => {
       return res.status(400).json({ message: "A solution file has already been uploaded for this question bank." });
     }
 
-    if (!storage) {
-      return res.status(500).json({ message: "Firebase Storage is not configured on the server. Please define Firebase environment variables in your .env file." });
+    let solutionUrl = "";
+    let isSLocal = false;
+
+    if (storage) {
+      try {
+        // Upload Solution to Firebase Storage
+        const sUniqueName = `question-banks/solutions/${Date.now()}-${req.file.originalname.replace(/\s+/g, "_")}`;
+        const sStorageRef = ref(storage, sUniqueName);
+        const sMetadata = { contentType: req.file.mimetype };
+        const sSnapshot = await uploadBytesResumable(sStorageRef, req.file.buffer, sMetadata);
+        solutionUrl = await getDownloadURL(sSnapshot.ref);
+      } catch (err) {
+        console.warn("Firebase Storage upload for solution file failed, falling back to local disk storage:", err.message);
+        isSLocal = true;
+      }
+    } else {
+      isSLocal = true;
     }
 
-    // Upload Solution to Firebase Storage
-    const sUniqueName = `question-banks/solutions/${Date.now()}-${req.file.originalname.replace(/\s+/g, "_")}`;
-    const sStorageRef = ref(storage, sUniqueName);
-    const sMetadata = { contentType: req.file.mimetype };
-    const sSnapshot = await uploadBytesResumable(sStorageRef, req.file.buffer, sMetadata);
-    const solutionUrl = await getDownloadURL(sSnapshot.ref);
+    if (isSLocal) {
+      const uploadDir = path.join(__dirname, "..", "uploads");
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const localFileName = `${Date.now()}-s-${req.file.originalname.replace(/\s+/g, "_")}`;
+      const localFilePath = path.join(uploadDir, localFileName);
+      fs.writeFileSync(localFilePath, req.file.buffer);
+      solutionUrl = `uploads/${localFileName}`;
+    }
 
     // Attach solution file
     questionBank.solutionFileName = req.file.originalname;

@@ -21,16 +21,36 @@ const uploadMaterial = async (req, res) => {
       return res.status(400).json({ message: "No file uploaded" });
     }
 
-    if (!storage) {
-      return res.status(500).json({ message: "Firebase Storage is not configured on the server. Please define Firebase environment variables in your .env file." });
+    let downloadUrl = "";
+    let isLocal = false;
+
+    if (storage) {
+      try {
+        // Upload to Firebase Storage
+        const uniqueName = `materials/${Date.now()}-${req.file.originalname.replace(/\s+/g, "_")}`;
+        const storageRef = ref(storage, uniqueName);
+        const metadata = { contentType: req.file.mimetype };
+        const snapshot = await uploadBytesResumable(storageRef, req.file.buffer, metadata);
+        downloadUrl = await getDownloadURL(snapshot.ref);
+      } catch (storageErr) {
+        console.warn("Firebase Storage upload failed, falling back to local disk storage:", storageErr.message);
+        isLocal = true;
+      }
+    } else {
+      console.warn("Firebase Storage is not configured, falling back to local disk storage.");
+      isLocal = true;
     }
 
-    // Upload to Firebase Storage
-    const uniqueName = `materials/${Date.now()}-${req.file.originalname.replace(/\s+/g, "_")}`;
-    const storageRef = ref(storage, uniqueName);
-    const metadata = { contentType: req.file.mimetype };
-    const snapshot = await uploadBytesResumable(storageRef, req.file.buffer, metadata);
-    const downloadUrl = await getDownloadURL(snapshot.ref);
+    if (isLocal) {
+      const uploadDir = path.join(__dirname, "..", "uploads");
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const localFileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, "_")}`;
+      const localFilePath = path.join(uploadDir, localFileName);
+      fs.writeFileSync(localFilePath, req.file.buffer);
+      downloadUrl = `uploads/${localFileName}`;
+    }
 
     const material = await Material.create({
       title,
