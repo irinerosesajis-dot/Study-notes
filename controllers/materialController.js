@@ -51,7 +51,7 @@ const uploadMaterial = async (req, res) => {
       material,
     });
   } catch (error) {
-    console.error("Upload error:", error.message);
+    console.error("Full upload error:", error);
     res.status(500).json({ message: "Server error during upload" });
   }
 };

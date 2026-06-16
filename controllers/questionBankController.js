@@ -71,6 +71,9 @@ const uploadQuestionBank = async (req, res) => {
     });
   } catch (error) {
     console.error("Question bank upload error:", error.message);
+    if (error.customData && error.customData.serverResponse) {
+      console.error("Firebase response details:", error.customData.serverResponse);
+    }
     res.status(500).json({ message: "Server error during upload" });
   }
 };
@@ -255,6 +258,9 @@ const addSolution = async (req, res) => {
     });
   } catch (error) {
     console.error("Add solution error:", error.message);
+    if (error.customData && error.customData.serverResponse) {
+      console.error("Firebase response details:", error.customData.serverResponse);
+    }
     res.status(500).json({ message: "Server error during solution upload" });
   }
 };
