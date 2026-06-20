@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const emailValidator = require("deep-email-validator");
 
 // Generate JWT token
 const generateToken = (userId) => {
@@ -20,6 +21,25 @@ const register = async (req, res) => {
       return res
         .status(400)
         .json({ message: "Please provide name, email and password" });
+    }
+
+    // Deep email validation
+    const validation = await emailValidator.validate({
+      email: email,
+      validateRegex: true,
+      validateMx: true,
+      validateTypo: true,
+      validateDisposable: true,
+      validateSMTP: false, // Disabled: frequently blocks real emails from Gmail/Yahoo
+    });
+
+    if (!validation.valid) {
+      const reasonKey = validation.reason;
+      const details = validation.validators[reasonKey]?.reason || "Unknown";
+      console.log("Email validation failed for:", email, "Reason:", reasonKey, "Details:", details);
+      return res.status(400).json({ 
+        message: `Email validation failed (${reasonKey}): ${details}` 
+      });
     }
 
     // Check if user already exists
