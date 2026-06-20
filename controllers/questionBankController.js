@@ -1,8 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const QuestionBank = require("../models/QuestionBank");
-const { storage } = require("../config/firebase");
-const { ref, uploadBytesResumable, getDownloadURL, deleteObject } = require("firebase/storage");
+const { supabase } = require("../config/supabase");
 
 // @desc    Upload a question bank (and optional solution)
 // @route   POST /api/question-banks/upload
@@ -27,20 +26,29 @@ const uploadQuestionBank = async (req, res) => {
     let questionUrl = "";
     let isQLocal = false;
 
-    if (storage) {
+    if (supabase) {
       try {
-        // Upload Question Paper to Firebase Storage
-        const qUniqueName = `question-banks/questions/${Date.now()}-${questionFile.originalname.replace(/\s+/g, "_")}`;
-        const qStorageRef = ref(storage, qUniqueName);
-        const qMetadata = { contentType: questionFile.mimetype };
-        const qSnapshot = await uploadBytesResumable(qStorageRef, questionFile.buffer, qMetadata);
-        questionUrl = await getDownloadURL(qSnapshot.ref);
+        // Upload Question Paper to Supabase Storage
+        const qUniqueName = `questions/${Date.now()}-${questionFile.originalname.replace(/\s+/g, "_")}`;
+        const { data, error } = await supabase.storage
+          .from("question-banks")
+          .upload(qUniqueName, questionFile.buffer, {
+            contentType: questionFile.mimetype,
+            upsert: false,
+          });
+
+        if (error) throw error;
+
+        const { data: urlData } = supabase.storage
+          .from("question-banks")
+          .getPublicUrl(qUniqueName);
+        questionUrl = urlData.publicUrl;
       } catch (err) {
-        console.warn("Firebase Storage upload for question file failed, falling back to local disk storage:", err.message);
+        console.warn("Supabase Storage upload for question file failed, falling back to local disk storage:", err.message);
         isQLocal = true;
       }
     } else {
-      console.warn("Firebase Storage is not configured, falling back to local disk storage for question file.");
+      console.warn("Supabase Storage is not configured, falling back to local disk storage for question file.");
       isQLocal = true;
     }
 
@@ -73,16 +81,25 @@ const uploadQuestionBank = async (req, res) => {
       let solutionUrl = "";
       let isSLocal = false;
 
-      if (storage) {
+      if (supabase) {
         try {
-          // Upload Solution to Firebase Storage
-          const sUniqueName = `question-banks/solutions/${Date.now()}-${solutionFile.originalname.replace(/\s+/g, "_")}`;
-          const sStorageRef = ref(storage, sUniqueName);
-          const sMetadata = { contentType: solutionFile.mimetype };
-          const sSnapshot = await uploadBytesResumable(sStorageRef, solutionFile.buffer, sMetadata);
-          solutionUrl = await getDownloadURL(sSnapshot.ref);
+          // Upload Solution to Supabase Storage
+          const sUniqueName = `solutions/${Date.now()}-${solutionFile.originalname.replace(/\s+/g, "_")}`;
+          const { data, error } = await supabase.storage
+            .from("question-banks")
+            .upload(sUniqueName, solutionFile.buffer, {
+              contentType: solutionFile.mimetype,
+              upsert: false,
+            });
+
+          if (error) throw error;
+
+          const { data: urlData } = supabase.storage
+            .from("question-banks")
+            .getPublicUrl(sUniqueName);
+          solutionUrl = urlData.publicUrl;
         } catch (err) {
-          console.warn("Firebase Storage upload for solution file failed, falling back to local disk storage:", err.message);
+          console.warn("Supabase Storage upload for solution file failed, falling back to local disk storage:", err.message);
           isSLocal = true;
         }
       } else {
@@ -215,15 +232,19 @@ const deleteQuestionBank = async (req, res) => {
     // Remove files
     if (questionBank.questionFilePath) {
       if (questionBank.questionFilePath.startsWith("http")) {
-        if (storage) {
+        if (supabase) {
           try {
-            const fileRef = ref(storage, questionBank.questionFilePath);
-            await deleteObject(fileRef);
+            const urlParts = questionBank.questionFilePath.split("/object/public/question-banks/");
+            if (urlParts.length > 1) {
+              const fileName = urlParts[1];
+              const { error } = await supabase.storage.from("question-banks").remove([fileName]);
+              if (error) throw error;
+            }
           } catch (err) {
-            console.error("Error deleting question paper from Firebase:", err.message);
+            console.error("Error deleting question paper from Supabase:", err.message);
           }
         } else {
-          console.warn("Firebase Storage is not configured. Skipping cloud file deletion.");
+          console.warn("Supabase Storage is not configured. Skipping cloud file deletion.");
         }
       } else {
         const qPath = path.join(__dirname, "..", questionBank.questionFilePath);
@@ -232,15 +253,19 @@ const deleteQuestionBank = async (req, res) => {
     }
     if (questionBank.solutionFilePath) {
       if (questionBank.solutionFilePath.startsWith("http")) {
-        if (storage) {
+        if (supabase) {
           try {
-            const fileRef = ref(storage, questionBank.solutionFilePath);
-            await deleteObject(fileRef);
+            const urlParts = questionBank.solutionFilePath.split("/object/public/question-banks/");
+            if (urlParts.length > 1) {
+              const fileName = urlParts[1];
+              const { error } = await supabase.storage.from("question-banks").remove([fileName]);
+              if (error) throw error;
+            }
           } catch (err) {
-            console.error("Error deleting solution from Firebase:", err.message);
+            console.error("Error deleting solution from Supabase:", err.message);
           }
         } else {
-          console.warn("Firebase Storage is not configured. Skipping cloud file deletion.");
+          console.warn("Supabase Storage is not configured. Skipping cloud file deletion.");
         }
       } else {
         const sPath = path.join(__dirname, "..", questionBank.solutionFilePath);
@@ -279,16 +304,25 @@ const addSolution = async (req, res) => {
     let solutionUrl = "";
     let isSLocal = false;
 
-    if (storage) {
+    if (supabase) {
       try {
-        // Upload Solution to Firebase Storage
-        const sUniqueName = `question-banks/solutions/${Date.now()}-${req.file.originalname.replace(/\s+/g, "_")}`;
-        const sStorageRef = ref(storage, sUniqueName);
-        const sMetadata = { contentType: req.file.mimetype };
-        const sSnapshot = await uploadBytesResumable(sStorageRef, req.file.buffer, sMetadata);
-        solutionUrl = await getDownloadURL(sSnapshot.ref);
+        // Upload Solution to Supabase Storage
+        const sUniqueName = `solutions/${Date.now()}-${req.file.originalname.replace(/\s+/g, "_")}`;
+        const { data, error } = await supabase.storage
+          .from("question-banks")
+          .upload(sUniqueName, req.file.buffer, {
+            contentType: req.file.mimetype,
+            upsert: false,
+          });
+
+        if (error) throw error;
+
+        const { data: urlData } = supabase.storage
+          .from("question-banks")
+          .getPublicUrl(sUniqueName);
+        solutionUrl = urlData.publicUrl;
       } catch (err) {
-        console.warn("Firebase Storage upload for solution file failed, falling back to local disk storage:", err.message);
+        console.warn("Supabase Storage upload for solution file failed, falling back to local disk storage:", err.message);
         isSLocal = true;
       }
     } else {

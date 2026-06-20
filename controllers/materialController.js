@@ -1,8 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const Material = require("../models/Material");
-const { storage } = require("../config/firebase");
-const { ref, uploadBytesResumable, getDownloadURL, deleteObject } = require("firebase/storage");
+const { supabase } = require("../config/supabase");
 
 // @desc    Upload a study material
 // @route   POST /api/materials/upload
@@ -24,20 +23,32 @@ const uploadMaterial = async (req, res) => {
     let downloadUrl = "";
     let isLocal = false;
 
-    if (storage) {
+    if (supabase) {
       try {
-        // Upload to Firebase Storage
-        const uniqueName = `materials/${Date.now()}-${req.file.originalname.replace(/\s+/g, "_")}`;
-        const storageRef = ref(storage, uniqueName);
-        const metadata = { contentType: req.file.mimetype };
-        const snapshot = await uploadBytesResumable(storageRef, req.file.buffer, metadata);
-        downloadUrl = await getDownloadURL(snapshot.ref);
+        // Upload to Supabase Storage
+        const uniqueName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, "_")}`;
+        const { data, error } = await supabase.storage
+          .from("materials")
+          .upload(uniqueName, req.file.buffer, {
+            contentType: req.file.mimetype,
+            upsert: false,
+          });
+
+        if (error) {
+          throw error;
+        }
+
+        const { data: urlData } = supabase.storage
+          .from("materials")
+          .getPublicUrl(uniqueName);
+          
+        downloadUrl = urlData.publicUrl;
       } catch (storageErr) {
-        console.warn("Firebase Storage upload failed, falling back to local disk storage:", storageErr.message);
+        console.warn("Supabase Storage upload failed, falling back to local disk storage:", storageErr.message);
         isLocal = true;
       }
     } else {
-      console.warn("Firebase Storage is not configured, falling back to local disk storage.");
+      console.warn("Supabase Storage is not configured, falling back to local disk storage.");
       isLocal = true;
     }
 
@@ -177,15 +188,21 @@ const deleteMaterial = async (req, res) => {
     // Remove file
     if (material.filePath) {
       if (material.filePath.startsWith("http")) {
-        if (storage) {
+        if (supabase) {
           try {
-            const fileRef = ref(storage, material.filePath);
-            await deleteObject(fileRef);
+            // Extract the file path from the Supabase public URL
+            // Format: https://[project].supabase.co/storage/v1/object/public/materials/[filename]
+            const urlParts = material.filePath.split("/object/public/materials/");
+            if (urlParts.length > 1) {
+              const fileName = urlParts[1];
+              const { error } = await supabase.storage.from("materials").remove([fileName]);
+              if (error) throw error;
+            }
           } catch (storageErr) {
-            console.error("Error deleting from Firebase Storage:", storageErr.message);
+            console.error("Error deleting from Supabase Storage:", storageErr.message);
           }
         } else {
-          console.warn("Firebase Storage is not configured. Skipping cloud file deletion.");
+          console.warn("Supabase Storage is not configured. Skipping cloud file deletion.");
         }
       } else {
         const absolutePath = path.join(__dirname, "..", material.filePath);
